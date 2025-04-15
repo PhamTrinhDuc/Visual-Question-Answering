@@ -1,0 +1,8 @@
+torch
+transformers
+underthesea
+vncorenlp
+pandas
+numpy
+pillow
+datasets
