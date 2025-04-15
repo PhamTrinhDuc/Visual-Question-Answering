@@ -5,5 +5,7 @@ vncorenlp
 pandas
 numpy
 pillow
+wandb
 datasets
 evaluate
+python-dotenv

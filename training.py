@@ -44,6 +44,7 @@ class VQADataCollatorForGeneration:
     padding: bool = True
 
     def __call__(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
+        print("batch", batch)
         """
         Gộp danh sách các mẫu thành batch.
 
@@ -104,13 +105,11 @@ if __name__ == "__main__":
   model = VQAModel(text_model=config.text_model, 
                     image_model=config.image_model, 
                     device=config.DEVICE).to(config.DEVICE)
-  print(count_parameters(model, only_trainable=False))
   
   data_collator = VQADataCollatorForGeneration(
     processor=VQAProcessor()
   )
   early_stop = EarlyStoppingCallback(early_stopping_patience = 2,early_stopping_threshold = 0)
-
 
   training_args = TrainingArguments(
     output_dir="./vqa_results",
