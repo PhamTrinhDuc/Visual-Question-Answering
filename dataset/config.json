@@ -1,0 +1,11 @@
+{
+  "dataset": {
+    "name": "openVQA",
+    "images_path": "./dataset/images",
+    "annotations": {
+      "train": "./dataset/openvivqa_train_v2.json",
+      "val": "./dataset/openvivqa_dev_v2.json",
+      "test": "./dataset/openvivqa_test_v2.json"
+    }
+  }
+}
