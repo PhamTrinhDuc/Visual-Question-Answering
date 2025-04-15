@@ -14,10 +14,10 @@ class StackAttention(nn.Module):
         self.ff_ques = nn.Linear(d_model, ff_dim)
         if dropout:
             self.dropout = nn.Dropout(p=0.5)
-        self.ff_attention = nn.Linear(ff_dim, 1)
+        self.ff_attention = nn.Linear(ff_dim, d_model)
 
     def forward(self, image_embed, ques_embed):
-        # [N, 49, 768] -> [N, 50, 512]
+        # [N, 768] -> [N, 512]
         h_image = self.ff_image(image_embed)
         # [N, 768] -> [N, 512] -> [N, 1, 512]
         h_question = self.ff_ques(ques_embed)
@@ -26,12 +26,8 @@ class StackAttention(nn.Module):
         if getattr(self, 'dropout'):
             h_attn = self.dropout(h_attn)
         # [N, 49, 512] -> [N, 49, 1] -> [N, 49]
-        h_attn = self.ff_attention(h_attn).squeeze(dim=2)
-        h_attn = F.softmax(h_attn)
-        # [N, 49,  1] * [N, 49, 768] -> [N,  768]
-        vi_attended = (h_attn.unsqueeze(dim=2) * image_embed).sum(dim=1)
-        u = vi_attended + ques_embed.squeeze(1)
-        return u
+        h_attn = self.ff_attention(h_attn)
+        return h_attn
 
 class VQAModel(nn.Module):
     def __init__(self, 
@@ -73,10 +69,8 @@ class VQAModel(nn.Module):
             ), 
             num_layers=num_layers)
         
-        self.lm_head = nn.Sequential(
-            nn.Dropout(p=dropout),
-            nn.Linear(d_model, vocab_size))
-        
+        self.lm_head = nn.Linear(d_model, vocab_size)
+
         self.tanh = nn.Tanh()
         self.dropout = nn.Dropout(p=dropout)
 
@@ -92,94 +86,26 @@ class VQAModel(nn.Module):
         """Tạo mask cho decoder."""
         mask = torch.triu(torch.ones(sz, sz), diagonal=1).bool()
         return mask
-    
-    def generate(
-    self,
-        images: Union[Image.Image, List[Image.Image]],
-        questions: Union[str, List[str]],
-        processor: VQAProcessor,
-        max_length: int = 64,
-        **kwargs
-    ) -> torch.Tensor:
-        """
-        Sinh câu trả lời từ hình ảnh và câu hỏi.
-
-        Args:
-            images: PIL Image hoặc list của PIL Images.
-            questions: Chuỗi hoặc list các chuỗi câu hỏi.
-            processor: VQAProcessor để xử lý input.
-            max_length: Độ dài tối đa của chuỗi sinh ra.
-
-        Returns:
-            torch.Tensor: Token IDs của câu trả lời.
-        """
-        # Xử lý input bằng processor
-        inputs = processor(
-            images=images,
-            questions=questions,
-            padding="max_length",
-            return_tensors="pt",
-        )
-        pixel_values = inputs["pixel_values"].to(self.vit.device)
-        input_ids = inputs["input_ids"].to(self.phobert.device)
-        attention_mask = inputs["attention_mask"].to(self.phobert.device)
-
-        # Mã hóa hình ảnh
-        vit_outputs = self.vit(pixel_values=pixel_values)
-        vit_hidden = vit_outputs.pooler_output  # [batch_size, hidden_size]
-
-        # Mã hóa câu hỏi
-        phobert_outputs = self.phobert(input_ids=input_ids, attention_mask=attention_mask)
-        phobert_hidden = phobert_outputs.pooler_output  # [batch_size, hidden_size]
-
-        # Kết hợp đặc trưng
-        combined_hidden = vit_hidden
-        for fusion_model in self.san_model: 
-            combined_hidden = fusion_model(vit_hidden, phobert_hidden)
         
-        # [N, 768] -> [N, 768]
-        fused_hidden = self.tanh(combined_hidden)
-        fused_hidden = self.dropout(fused_hidden)
-
-        # Sinh chuỗi
-        generated_ids = [self.tokenizer.bos_token_id]
-        decoder_input_ids = torch.tensor([[self.tokenizer.bos_token_id]], device=input_ids.device)
-        
-        for _ in range(max_length):
-            decoder_embeds = self.lm_head.weight[decoder_input_ids]
-            decoder_outputs = self.transformer_decoder(
-                tgt=decoder_embeds,
-                memory=fused_hidden.unsqueeze(1),
-                tgt_mask=self._generate_square_subsequent_mask(decoder_input_ids.size(1)).to(decoder_input_ids.device),
-            )
-            logits = self.lm_head(decoder_outputs[:, -1, :])
-            next_token = torch.argmax(logits, dim=-1)
-            generated_ids.append(next_token.item())
-            decoder_input_ids = torch.cat([decoder_input_ids, next_token.unsqueeze(0)], dim=1)
-            if next_token.item() == self.tokenizer.eos_token_id:
-                break
-        
-        return torch.tensor(generated_ids, device=input_ids.device)
-            
     def forward(self, 
                 pixel_values: torch.FloatTensor, 
                 input_ids: torch.LongTensor,
                 attention_mask: torch.FloatTensor,
                 labels: torch.LongTensor = None,
                 return_dict: bool = False):
-        # [N, 3, 224, 224] -> [N, 197, 768]
-        # Mã hóa hình ảnh với ViT
-        vit_outputs = self.vit(pixel_values=pixel_values)
-        vit_hidden = vit_outputs.pooler_output  # [batch_size, hidden_size]
+        # print("pixel_values", pixel_values.shape, "input_ids", input_ids.shape, "attention_mask", attention_mask.shape)
+        # [B, 3, 224, 224] -> [B, 768]
+        vit_outputs = self.vit(pixel_values)
+        vit_hidden = vit_outputs.pooler_output
         
-        # text => [N, 64, 768]
-        # Mã hóa câu hỏi với PhoBERT
+        # [B, max_len] -> [B, 768]
         phobert_outputs = self.phobert(
             input_ids=input_ids,
             attention_mask=attention_mask,
         )
-        phobert_hidden = phobert_outputs.pooler_output  # [batch_size, hidden_size]
+        phobert_hidden = phobert_outputs.pooler_output 
         # [N, 64, 768] + [N, 197, 768] => [N, 768]
+        # print("vit_hidden", vit_hidden.shape, "phobert_hidden", phobert_hidden.shape)
         for att_layer in self.san_model:
             fused_hidden = att_layer(vit_hidden, phobert_hidden)
 
@@ -219,3 +145,72 @@ class VQAModel(nn.Module):
                 hidden_states=decoder_outputs,
             )
         return (loss, logits)
+    
+    def generate(
+        self,
+            images: Union[Image.Image, List[Image.Image]],
+            questions: Union[str, List[str]],
+            processor: VQAProcessor,
+            max_length: int = 64,
+            **kwargs
+        ) -> torch.Tensor:
+            """
+            Sinh câu trả lời từ hình ảnh và câu hỏi.
+
+            Args:
+                images: PIL Image hoặc list của PIL Images.
+                questions: Chuỗi hoặc list các chuỗi câu hỏi.
+                processor: VQAProcessor để xử lý input.
+                max_length: Độ dài tối đa của chuỗi sinh ra.
+
+            Returns:
+                torch.Tensor: Token IDs của câu trả lời.
+            """
+            # Xử lý input bằng processor
+            inputs = processor(
+                images=images,
+                questions=questions,
+                padding="max_length",
+                return_tensors="pt",
+            )
+            pixel_values = inputs["pixel_values"].to(self.vit.device)
+            input_ids = inputs["input_ids"].to(self.phobert.device)
+            attention_mask = inputs["attention_mask"].to(self.phobert.device)
+
+            # Mã hóa hình ảnh
+            vit_outputs = self.vit(pixel_values)
+            vit_hidden = vit_outputs.pooler_output  # [batch_size, hidden_size]
+
+            # Mã hóa câu hỏi
+            phobert_outputs = self.phobert(input_ids=input_ids, attention_mask=attention_mask)
+            phobert_hidden = phobert_outputs.pooler_output  # [batch_size, hidden_size]
+
+            # Kết hợp đặc trưng
+            combined_hidden = vit_hidden
+            for fusion_model in self.san_model: 
+                combined_hidden = fusion_model(vit_hidden, phobert_hidden)
+            
+            # [N, 768] -> [N, 768]
+            fused_hidden = self.tanh(combined_hidden)
+            fused_hidden = self.dropout(fused_hidden)
+
+            # Sinh chuỗi
+            generated_ids = [self.tokenizer.bos_token_id]
+            decoder_input_ids = torch.tensor([[self.tokenizer.bos_token_id]], device=input_ids.device)
+            
+            for _ in range(max_length):
+                decoder_embeds = self.lm_head.weight[decoder_input_ids]
+                decoder_outputs = self.transformer_decoder(
+                    tgt=decoder_embeds,
+                    memory=fused_hidden.unsqueeze(1),
+                    tgt_mask=self._generate_square_subsequent_mask(decoder_input_ids.size(1)).to(decoder_input_ids.device),
+                )
+                logits = self.lm_head(decoder_outputs[:, -1, :])
+                next_token = torch.argmax(logits, dim=-1)
+                generated_ids.append(next_token.item())
+                decoder_input_ids = torch.cat([decoder_input_ids, next_token.unsqueeze(0)], dim=1)
+                if next_token.item() == self.tokenizer.eos_token_id:
+                    break
+            
+            return torch.tensor(generated_ids, device=input_ids.device)
+            

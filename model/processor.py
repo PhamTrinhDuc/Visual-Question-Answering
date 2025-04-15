@@ -16,8 +16,8 @@ class VQAProcessor:
         self,
         feature_extractor_name: str = config.image_model,
         tokenizer_name: str = config.text_model,
-        max_question_length: int = 24,
-        max_answer_length: int = 64,
+        max_question_length: int = config.MAX_LEN,
+        max_answer_length: int = config.MAX_LEN,
     ):
         self.feature_extractor = ViTImageProcessor.from_pretrained(feature_extractor_name)
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
