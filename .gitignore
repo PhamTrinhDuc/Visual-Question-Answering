@@ -17,7 +17,8 @@ images
 db
 debug.ipynb
 cache  
-
+.vqa_results
+wandb
 # Distribution / packaging
 .Python
 build/

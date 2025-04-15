@@ -6,6 +6,7 @@ import os
 import dotenv
 dotenv.load_dotenv()
 from torchvision import transforms
+from torch.utils.data import DataLoader
 from dataclasses import dataclass
 from typing import Dict, Tuple, List
 from transformers import (
@@ -21,7 +22,7 @@ from config import config
 from model.vqa_model import VQAModel
 from model.processor import VQAProcessor
 
-wandb.login(key=os.getenv("WANDB_API_KEY"))
+# wandb.login(key=os.getenv("WANDB_API_KEY"))
 tokenizer = AutoTokenizer.from_pretrained(config.text_model)
 processor = AutoFeatureExtractor.from_pretrained(config.image_model)
 vocab = tokenizer.get_vocab()
@@ -44,38 +45,55 @@ class VQADataCollatorForGeneration:
     padding: bool = True
 
     def __call__(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
-        """
-        Gộp danh sách các mẫu thành batch.
+      print("batch", batch)
+      """
+      Gộp danh sách các mẫu thành batch.
 
-        Args:
-            batch: List[Dict] chứa:
-                - image: PIL Image
-                - question: Chuỗi câu hỏi
-                - label: Chuỗi câu trả lời
+      Args:
+          batch: List[Dict] chứa:
+              - image: PIL Image
+              - question: Chuỗi câu hỏi
+              - label: Chuỗi câu trả lời
 
-        Returns:
-            Dict chứa:
-                - pixel_values: [batch_size, channels, height, width]
-                - input_ids: [batch_size, question_seq_len]
-                - attention_mask: [batch_size, question_seq_len]
-                - labels: [batch_size, answer_seq_len]
-        """
-        # Tách các thành phần
-        images = [item["image"] for item in batch]
-        questions = [item["question"] for item in batch]
-        answers = [item["label"] for item in batch]
+      Returns:
+          Dict chứa:
+              - pixel_values: [batch_size, channels, height, width]
+              - input_ids: [batch_size, question_seq_len]
+              - attention_mask: [batch_size, question_seq_len]
+              - labels: [batch_size, answer_seq_len]
+      """
+      # Tách các thành phần
+      images = [item["image"] for item in batch]
+      questions = [item["question"] for item in batch]
+      answers = [item["answer"] for item in batch]
 
-        # Gọi processor để xử lý
-        batch_features = self.processor(
-            images=images,
-            questions=questions,
-            answers=answers,
-            padding="longest" if self.padding else False,
-            return_tensors="pt",
-        )
+      # Gọi processor để xử lý
+      batch_features = self.processor(
+          images=images,
+          questions=questions,
+          answers=answers,
+          padding="longest" if self.padding else False,
+          return_tensors="pt",
+      )
 
-        return batch_features
-  
+      return batch_features
+
+class CustomTrainer(Trainer):
+  def get_train_dataloader(self):
+      return DataLoader(
+          self.train_dataset,
+          batch_size=self.args.per_device_train_batch_size,
+          collate_fn=self.data_collator,
+          shuffle=True
+      )
+  def get_eval_dataloader(self, eval_dataset=None):
+      return DataLoader(
+          eval_dataset or self.eval_dataset,
+          batch_size=self.args.per_device_eval_batch_size,
+          collate_fn=self.data_collator,
+          shuffle=False
+      )
+    
 def compute_metrics(eval_tuple: Tuple[np.ndarray, np.ndarray]) -> Dict[str, float]:
   print("eval_tuple", eval_tuple)
   print("eval tuple shape: ", eval_tuple[0].shape, eval_tuple[1].shape)
@@ -98,16 +116,14 @@ if __name__ == "__main__":
     ])
   
   train_dataset = VQADataset(dataframe=df_train, transform=transforms, mode="train")
-  dev_dataset = VQADataset(dataframe=df_dev, transform=transforms, mode="dev")
+  eval_dataset = VQADataset(dataframe=df_dev, transform=transforms, mode="dev")
   test_dataset = VQADataset(dataframe=df_test, mode="test")
 
   model = VQAModel(text_model=config.text_model, 
                     image_model=config.image_model, 
                     device=config.DEVICE).to(config.DEVICE)
   
-  data_collator = VQADataCollatorForGeneration(
-    processor=VQAProcessor()
-  )
+  data_collator = VQADataCollatorForGeneration(processor=VQAProcessor())
   early_stop = EarlyStoppingCallback(early_stopping_patience = 2,early_stopping_threshold = 0)
 
   training_args = TrainingArguments(
@@ -127,7 +143,7 @@ if __name__ == "__main__":
     save_total_limit=2,
     fp16=True,  # Mixed precision cho GPU
     max_grad_norm=1.0,  # Gradient clipping để ổn định huấn luyện
-    report_to="wandb",
+    # report_to="wandb",
     gradient_accumulation_steps=4,
   )
 
@@ -137,14 +153,19 @@ if __name__ == "__main__":
   #    config=training_args
   # )
 
-  trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=dev_dataset,
-    data_collator=data_collator,
-    compute_metrics=compute_metrics,
-    callbacks=[early_stop],
+  # Tạo Trainer
+  trainer = CustomTrainer(
+      model=model,
+      args=training_args,
+      train_dataset=train_dataset,
+      eval_dataset=eval_dataset,
+      data_collator=data_collator,
+      compute_metrics=compute_metrics,
+      callbacks=[early_stop],
   )
+
+  # Kiểm tra batch
+  # batch = trainer.get_train_dataloader().__iter__().__next__()
+  # print("Batch from Trainer:", batch.keys())
 
   trainer.train()

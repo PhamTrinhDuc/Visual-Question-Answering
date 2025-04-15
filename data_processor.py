@@ -26,16 +26,12 @@ class VQADataset(Dataset):
     def __getitem__(self, idx):
         image_name, question, answer = self.data.iloc[idx]
         image_path = os.path.join(config.FOLDER_IMAGE_PATH, image_name)
-        try:
-            image = Image.open(image_path).convert('RGB')
-        except:
-            print(f"Error loading image: {image_path}")
-            return
+        image = Image.open(image_path).convert('RGB')
         if self.transform:
             image = self.transform(image)
 
         return {
             "image": image,
             "question": question,
-            "label": answer,
+            "answer": answer,
         }

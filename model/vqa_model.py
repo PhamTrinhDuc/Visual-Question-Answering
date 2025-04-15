@@ -63,7 +63,6 @@ class VQAModel(nn.Module):
             [StackAttention(d_model=d_model, 
                             ff_dim=ff_dim, 
                             dropout=True)] * num_layers)
-        
         self.transformer_decoder = nn.TransformerDecoder(
             decoder_layer=nn.TransformerDecoderLayer(
                 d_model=d_model, 
