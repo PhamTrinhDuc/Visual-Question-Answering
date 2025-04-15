@@ -51,7 +51,6 @@ class VQAProcessor:
                 - attention_mask: [batch_size, question_seq_len]
                 - labels: [batch_size, answer_seq_len] (nếu có answers)
         """
-        # Chuẩn hóa input
         if isinstance(images, Image.Image):
             images = [images]
         if isinstance(questions, str):
@@ -59,14 +58,12 @@ class VQAProcessor:
         if answers is not None and isinstance(answers, str):
             answers = [answers]
 
-        # Xử lý hình ảnh
         image_features = self.feature_extractor(
             images=images,
             return_tensors=return_tensors,
         )
         pixel_values = image_features["pixel_values"]  # [batch_size, channels, height, width]
 
-        # Xử lý câu hỏi
         question_features = self.tokenizer(
             text=questions,
             padding=padding,
@@ -78,7 +75,6 @@ class VQAProcessor:
         input_ids = question_features["input_ids"]  # [batch_size, question_seq_len]
         attention_mask = question_features["attention_mask"]  # [batch_size, question_seq_len]
 
-        # Tạo output
         output = {
             "pixel_values": pixel_values,
             "input_ids": input_ids,

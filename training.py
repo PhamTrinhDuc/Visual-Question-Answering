@@ -44,7 +44,6 @@ class VQADataCollatorForGeneration:
     padding: bool = True
 
     def __call__(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
-        print("batch", batch)
         """
         Gộp danh sách các mẫu thành batch.
 
@@ -132,11 +131,11 @@ if __name__ == "__main__":
     gradient_accumulation_steps=4,
   )
 
-  wandb.init(
-     project="vqa-training",
-     name="vqa-from-scratch", 
-     config=training_args
-  )
+  # wandb.init(
+  #    project="vqa-training",
+  #    name="vqa-from-scratch", 
+  #    config=training_args
+  # )
 
   trainer = Trainer(
     model=model,
