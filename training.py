@@ -1,18 +1,27 @@
 import torch
 import pandas as pd
 import numpy as np
+import wandb
+import os
+import dotenv
+dotenv.load_dotenv()
 from torchvision import transforms
 from dataclasses import dataclass
 from typing import Dict, Tuple, List
-from transformers import AutoTokenizer
-from transformers import Trainer, TrainingArguments
-from transformers import AutoFeatureExtractor
+from transformers import (
+  Trainer, 
+  AutoTokenizer,
+  TrainingArguments, 
+  EarlyStoppingCallback, 
+  AutoFeatureExtractor,
+)
 from sklearn.metrics import accuracy_score, f1_score
 from data_processor import VQADataset
 from config import config
 from model.vqa_model import VQAModel
 from model.processor import VQAProcessor
 
+wandb.login(key=os.getenv("WANDB_API_KEY"))
 tokenizer = AutoTokenizer.from_pretrained(config.text_model)
 processor = AutoFeatureExtractor.from_pretrained(config.image_model)
 vocab = tokenizer.get_vocab()
@@ -68,6 +77,8 @@ class VQADataCollatorForGeneration:
         return batch_features
   
 def compute_metrics(eval_tuple: Tuple[np.ndarray, np.ndarray]) -> Dict[str, float]:
+  print("eval_tuple", eval_tuple)
+  print("eval tuple shape: ", eval_tuple[0].shape, eval_tuple[1].shape)
   logits, labels = eval_tuple
   preds = logits.argmax(axis=1)
   return {
@@ -90,7 +101,6 @@ if __name__ == "__main__":
   dev_dataset = VQADataset(dataframe=df_dev, transform=transforms, mode="dev")
   test_dataset = VQADataset(dataframe=df_test, mode="test")
 
-
   model = VQAModel(text_model=config.text_model, 
                     image_model=config.image_model, 
                     device=config.DEVICE).to(config.DEVICE)
@@ -99,6 +109,8 @@ if __name__ == "__main__":
   data_collator = VQADataCollatorForGeneration(
     processor=VQAProcessor()
   )
+  early_stop = EarlyStoppingCallback(early_stopping_patience = 2,early_stopping_threshold = 0)
+
 
   training_args = TrainingArguments(
     output_dir="./vqa_results",
@@ -109,7 +121,7 @@ if __name__ == "__main__":
     warmup_steps=500,
     save_steps=500,
     logging_steps=100,
-    evaluation_strategy="steps",
+    eval_strategy="epoch",
     eval_steps=500,
     load_best_model_at_end=True,
     metric_for_best_model="eval_loss",
@@ -121,6 +133,12 @@ if __name__ == "__main__":
     gradient_accumulation_steps=4,
   )
 
+  wandb.init(
+     project="vqa-training",
+     name="vqa-from-scratch", 
+     config=training_args
+  )
+
   trainer = Trainer(
     model=model,
     args=training_args,
@@ -128,6 +146,7 @@ if __name__ == "__main__":
     eval_dataset=dev_dataset,
     data_collator=data_collator,
     compute_metrics=compute_metrics,
+    callbacks=[early_stop],
   )
 
   trainer.train()

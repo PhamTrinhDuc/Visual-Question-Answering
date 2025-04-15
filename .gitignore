@@ -12,7 +12,8 @@ __pycache__/
 
 # C extensions
 *.so
-dataset
+*.jar 
+images
 db
 debug.ipynb
 cache  
