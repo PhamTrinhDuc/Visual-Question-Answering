@@ -14,7 +14,7 @@ class config:
     SEED = 42
     EPOCHS = 7
     MAX_LEN = 64
-    BATCH_SIZE = 4
+    BATCH_SIZE = 8
     DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     NUM_WORKERS = os.cpu_count()
     

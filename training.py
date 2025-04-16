@@ -45,7 +45,7 @@ class VQADataCollatorForGeneration:
     padding: bool = True
 
     def __call__(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
-      print("batch", batch)
+      print("Batch :", batch)
       """
       Gộp danh sách các mẫu thành batch.
 
@@ -84,6 +84,7 @@ class CustomTrainer(Trainer):
           self.train_dataset,
           batch_size=self.args.per_device_train_batch_size,
           collate_fn=self.data_collator,
+          num_workers=4,
           shuffle=True
       )
   def get_eval_dataloader(self, eval_dataset=None):
@@ -91,6 +92,7 @@ class CustomTrainer(Trainer):
           eval_dataset or self.eval_dataset,
           batch_size=self.args.per_device_eval_batch_size,
           collate_fn=self.data_collator,
+          num_workers=4,
           shuffle=False
       )
     
@@ -134,9 +136,9 @@ if __name__ == "__main__":
     learning_rate=3e-5,
     warmup_steps=500,
     save_steps=500,
-    logging_steps=100,
+    logging_steps=1,
     eval_strategy="epoch",
-    eval_steps=500,
+    eval_steps=0.1,
     load_best_model_at_end=True,
     metric_for_best_model="eval_loss",
     save_strategy="epoch",  # Hoặc "no"
@@ -168,4 +170,4 @@ if __name__ == "__main__":
   # batch = trainer.get_train_dataloader().__iter__().__next__()
   # print("Batch from Trainer:", batch.keys())
 
-  trainer.train()
+#   trainer.train()
