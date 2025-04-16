@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import wandb
 import os
+import evaluate
 import dotenv
 dotenv.load_dotenv()
 from torchvision import transforms
@@ -45,7 +46,6 @@ class VQADataCollatorForGeneration:
   padding: bool = True
 
   def __call__(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
-    print("Batch :", batch)
     """
     Gộp danh sách các mẫu thành batch.
 
@@ -99,13 +99,28 @@ class CustomTrainer(Trainer):
 def compute_metrics(eval_tuple: Tuple[np.ndarray, np.ndarray]) -> Dict[str, float]:
   print("eval_tuple", eval_tuple)
   print("eval tuple shape: ", eval_tuple[0].shape, eval_tuple[1].shape)
-  logits, labels = eval_tuple
-  preds = logits.argmax(axis=1)
-  return {
-      "acc": accuracy_score(labels, preds),
-      "f1": f1_score(labels, preds, average='macro')
-  }
 
+  bleu_metric = evaluate.load("bleu")
+  rouge_metric = evaluate.load("rouge")
+  
+  # Decode nếu là ID (bắt buộc nếu Trainer trả ra token ID)
+  predictions = tokenizer.batch_decode(predictions, skip_special_tokens=True)
+  references = tokenizer.batch_decode(references, skip_special_tokens=True)
+
+  predictions = [pred.strip() for pred in predictions]
+  references = [ref.strip() for ref in references]
+
+  # BLEU expects list of list of tokens
+  bleu = bleu_metric.compute(predictions=[p.split() for p in predictions],
+                              references=[[r.split()] for r in references])
+  # ROUGE expects plain text
+  rouge = rouge_metric.compute(predictions=predictions,
+                                references=references,
+                                use_stemmer=True)
+  return {
+      "bleu": bleu["bleu"],
+      "rougeL": rouge["rougeL"]
+  }
 if __name__ == "__main__":
 
   df_train = pd.read_csv(config.train_csv)
@@ -132,9 +147,10 @@ if __name__ == "__main__":
     output_dir="./vqa_results",
     per_device_train_batch_size=config.BATCH_SIZE,
     per_device_eval_batch_size=config.BATCH_SIZE,
+    # max_steps=1000,
     num_train_epochs=5,
     learning_rate=3e-5,
-    warmup_steps=500,
+    warmup_steps=50,
     save_steps=500,
     logging_steps=1,
     eval_strategy="epoch",
@@ -170,7 +186,7 @@ if __name__ == "__main__":
   batch = trainer.get_train_dataloader().__iter__().__next__()
   print("Batch from Trainer:", batch.keys())
 
-  
+
   print("Starting training...") 
   trainer.train()
   print("Training completed.")
