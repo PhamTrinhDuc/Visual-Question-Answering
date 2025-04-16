@@ -38,63 +38,63 @@ def count_parameters(model, only_trainable=True):
  
 @dataclass
 class VQADataCollatorForGeneration:
+  """
+  Data collator cho VQA, sử dụng VQAProcessor.
+  """
+  processor: VQAProcessor
+  padding: bool = True
+
+  def __call__(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
+    print("Batch :", batch)
     """
-    Data collator cho VQA, sử dụng VQAProcessor.
+    Gộp danh sách các mẫu thành batch.
+
+    Args:
+        batch: List[Dict] chứa:
+            - image: PIL Image
+            - question: Chuỗi câu hỏi
+            - label: Chuỗi câu trả lời
+
+    Returns:
+        Dict chứa:
+            - pixel_values: [batch_size, channels, height, width]
+            - input_ids: [batch_size, question_seq_len]
+            - attention_mask: [batch_size, question_seq_len]
+            - labels: [batch_size, answer_seq_len]
     """
-    processor: VQAProcessor
-    padding: bool = True
+    # Tách các thành phần
+    images = [item["image"] for item in batch]
+    questions = [item["question"] for item in batch]
+    answers = [item["answer"] for item in batch]
 
-    def __call__(self, batch: List[Dict]) -> Dict[str, torch.Tensor]:
-      print("Batch :", batch)
-      """
-      Gộp danh sách các mẫu thành batch.
+    # Gọi processor để xử lý
+    batch_features = self.processor(
+        images=images,
+        questions=questions,
+        answers=answers,
+        padding="longest" if self.padding else False,
+        return_tensors="pt",
+    )
 
-      Args:
-          batch: List[Dict] chứa:
-              - image: PIL Image
-              - question: Chuỗi câu hỏi
-              - label: Chuỗi câu trả lời
-
-      Returns:
-          Dict chứa:
-              - pixel_values: [batch_size, channels, height, width]
-              - input_ids: [batch_size, question_seq_len]
-              - attention_mask: [batch_size, question_seq_len]
-              - labels: [batch_size, answer_seq_len]
-      """
-      # Tách các thành phần
-      images = [item["image"] for item in batch]
-      questions = [item["question"] for item in batch]
-      answers = [item["answer"] for item in batch]
-
-      # Gọi processor để xử lý
-      batch_features = self.processor(
-          images=images,
-          questions=questions,
-          answers=answers,
-          padding="longest" if self.padding else False,
-          return_tensors="pt",
-      )
-
-      return batch_features
+    return batch_features
 
 class CustomTrainer(Trainer):
   def get_train_dataloader(self):
-      return DataLoader(
-          self.train_dataset,
-          batch_size=self.args.per_device_train_batch_size,
-          collate_fn=self.data_collator,
-          num_workers=4,
-          shuffle=True
-      )
+    return DataLoader(
+        self.train_dataset,
+        batch_size=self.args.per_device_train_batch_size,
+        collate_fn=self.data_collator,
+        num_workers=4,
+        shuffle=True
+    )
   def get_eval_dataloader(self, eval_dataset=None):
-      return DataLoader(
-          eval_dataset or self.eval_dataset,
-          batch_size=self.args.per_device_eval_batch_size,
-          collate_fn=self.data_collator,
-          num_workers=4,
-          shuffle=False
-      )
+    return DataLoader(
+        eval_dataset or self.eval_dataset,
+        batch_size=self.args.per_device_eval_batch_size,
+        collate_fn=self.data_collator,
+        num_workers=4,
+        shuffle=False
+    )
     
 def compute_metrics(eval_tuple: Tuple[np.ndarray, np.ndarray]) -> Dict[str, float]:
   print("eval_tuple", eval_tuple)
@@ -113,9 +113,9 @@ if __name__ == "__main__":
   df_test = pd.read_csv(config.test_csv)
 
   transforms = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-    ])
+      transforms.Resize((224, 224)),
+      transforms.ToTensor(),
+  ])
   
   train_dataset = VQADataset(dataframe=df_train, transform=transforms, mode="train")
   eval_dataset = VQADataset(dataframe=df_dev, transform=transforms, mode="dev")
@@ -157,17 +157,20 @@ if __name__ == "__main__":
 
   # Tạo Trainer
   trainer = CustomTrainer(
-      model=model,
-      args=training_args,
-      train_dataset=train_dataset,
-      eval_dataset=eval_dataset,
-      data_collator=data_collator,
-      compute_metrics=compute_metrics,
-      callbacks=[early_stop],
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
+    data_collator=data_collator,
+    compute_metrics=compute_metrics,
+    callbacks=[early_stop],
   )
 
   # Kiểm tra batch
-  # batch = trainer.get_train_dataloader().__iter__().__next__()
-  # print("Batch from Trainer:", batch.keys())
+  batch = trainer.get_train_dataloader().__iter__().__next__()
+  print("Batch from Trainer:", batch.keys())
 
-#   trainer.train()
+  
+  print("Starting training...") 
+  trainer.train()
+  print("Training completed.")
