@@ -3,8 +3,7 @@ from PIL import Image
 from config import config
 from typing import Dict, List, Union
 from transformers import AutoTokenizer
-from transformers import ViTImageProcessor
-
+from transformers import ViTFeatureExtractor
 
 
 class VQAProcessor:
@@ -19,7 +18,7 @@ class VQAProcessor:
         max_question_length: int = config.MAX_LEN,
         max_answer_length: int = config.MAX_LEN,
     ):
-        self.feature_extractor = ViTImageProcessor.from_pretrained(feature_extractor_name)
+        self.feature_extractor = ViTFeatureExtractor.from_pretrained(feature_extractor_name)
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         self.max_question_length = max_question_length
         self.max_answer_length = max_answer_length

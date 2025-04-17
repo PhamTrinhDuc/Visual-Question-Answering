@@ -17,7 +17,6 @@ from transformers import (
   EarlyStoppingCallback, 
   AutoFeatureExtractor,
 )
-from sklearn.metrics import accuracy_score, f1_score
 from data_processor import VQADataset
 from config import config
 from model.vqa_model import VQAModel
@@ -75,27 +74,25 @@ class VQADataCollatorForGeneration:
         padding="longest" if self.padding else False,
         return_tensors="pt",
     )
-
     return batch_features
 
 class CustomTrainer(Trainer):
   def get_train_dataloader(self):
     return DataLoader(
         self.train_dataset,
-        batch_size=self.args.per_device_train_batch_size,
         collate_fn=self.data_collator,
         num_workers=4,
         shuffle=True
     )
+
   def get_eval_dataloader(self, eval_dataset=None):
     return DataLoader(
         eval_dataset or self.eval_dataset,
-        batch_size=self.args.per_device_eval_batch_size,
         collate_fn=self.data_collator,
         num_workers=4,
         shuffle=False
     )
-    
+  
 def compute_metrics(eval_tuple: Tuple[np.ndarray, np.ndarray]) -> Dict[str, float]:
   print("eval_tuple", eval_tuple)
   print("eval tuple shape: ", eval_tuple[0].shape, eval_tuple[1].shape)
@@ -121,8 +118,8 @@ def compute_metrics(eval_tuple: Tuple[np.ndarray, np.ndarray]) -> Dict[str, floa
       "bleu": bleu["bleu"],
       "rougeL": rouge["rougeL"]
   }
-if __name__ == "__main__":
 
+if __name__ == "__main__":
   df_train = pd.read_csv(config.train_csv)
   df_dev = pd.read_csv(config.dev_csv)
   df_test = pd.read_csv(config.test_csv)
@@ -146,11 +143,11 @@ if __name__ == "__main__":
   training_args = TrainingArguments(
     output_dir="./vqa_results",
     per_device_train_batch_size=config.BATCH_SIZE,
-    per_device_eval_batch_size=config.BATCH_SIZE,
+    per_device_eval_batch_size=max(1, config.BATCH_SIZE // 2),  # Giảm batch size cho evaluation
     # max_steps=1000,
     num_train_epochs=5,
     learning_rate=3e-5,
-    warmup_steps=50,
+    # warmup_steps=50,
     save_steps=500,
     logging_steps=1,
     eval_strategy="epoch",
@@ -178,14 +175,13 @@ if __name__ == "__main__":
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
     data_collator=data_collator,
-    compute_metrics=compute_metrics,
+    # compute_metrics=compute_metrics,
     callbacks=[early_stop],
   )
 
   # Kiểm tra batch
   batch = trainer.get_train_dataloader().__iter__().__next__()
   print("Batch from Trainer:", batch.keys())
-
 
   print("Starting training...") 
   trainer.train()

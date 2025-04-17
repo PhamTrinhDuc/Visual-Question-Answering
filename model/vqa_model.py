@@ -93,58 +93,108 @@ class VQAModel(nn.Module):
                 attention_mask: torch.FloatTensor,
                 labels: torch.LongTensor = None,
                 return_dict: bool = False):
-        # print("pixel_values", pixel_values.shape, "input_ids", input_ids.shape, "attention_mask", attention_mask.shape)
         # [B, 3, 224, 224] -> [B, 768]
-        vit_outputs = self.vit(pixel_values)
-        vit_hidden = vit_outputs.pooler_output
-        
-        # [B, max_len] -> [B, 768]
-        phobert_outputs = self.phobert(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-        )
-        phobert_hidden = phobert_outputs.pooler_output 
-        # [N, 64, 768] + [N, 197, 768] => [N, 768]
-        # print("vit_hidden", vit_hidden.shape, "phobert_hidden", phobert_hidden.shape)
-        for att_layer in self.san_model:
-            fused_hidden = att_layer(vit_hidden, phobert_hidden)
-
-        fused_hidden = self.tanh(fused_hidden)
-        fused_hidden = self.dropout(fused_hidden)
-
-        # START DECODER
-        # Chuẩn bị input cho decoder
-        if labels is not None:
-            decoder_input_ids = self._shift_right(labels)
-        else:
-            # Trong suy luận, khởi tạo với token bắt đầu (nếu cần)
-            decoder_input_ids = torch.ones(
-                (input_ids.size(0), 1), dtype=torch.long, device=input_ids.device
-            ) * self.tokenizer.bos_token_id
-        # Tạo embedding cho decoder
-        decoder_embeds = self.lm_head.weight[decoder_input_ids]
-
-        decoder_outputs = self.transformer_decoder(
-            tgt=decoder_embeds,
-            memory=fused_hidden.unsqueeze(1),  # [batch_size, 1, hidden_size]
-            tgt_mask=self._generate_square_subsequent_mask(decoder_embeds.size(1)).to(decoder_embeds.device),
-        )
-        # END DECODER
-        logits = self.lm_head(decoder_outputs)  # [batch_size, answer_seq_len, vocab_size]
-
-        # Tính loss nếu có labels
-        loss = None
-        if labels is not None:
-            loss_fct = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)
-            loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1))
-
-        if return_dict:
-            return CausalLMOutputWithCrossAttentions(
-                loss=loss,
-                logits=logits,
-                hidden_states=decoder_outputs,
+        with torch.cuda.amp.autocast(enabled=True):  # Sử dụng mixed precision để tiết kiệm bộ nhớ
+            with torch.no_grad():  # Không cần tính gradient của vit trong forward
+                vit_outputs = self.vit(pixel_values)
+                vit_hidden = vit_outputs.pooler_output
+                
+                # Giải phóng bộ nhớ các biến trung gian
+                del vit_outputs
+                torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            
+            # [B, max_len] -> [B, 768]
+            phobert_outputs = self.phobert(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
             )
-        return (loss, logits)
+            phobert_hidden = phobert_outputs.pooler_output 
+            
+            # Giải phóng bộ nhớ
+            del phobert_outputs
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            
+            # [N, 768] + [N, 768] => [N, 768]
+            fused_hidden = phobert_hidden.clone()  # Khởi tạo
+            for att_layer in self.san_model:
+                fused_hidden = att_layer(vit_hidden, phobert_hidden)
+
+            fused_hidden = self.tanh(fused_hidden)
+            fused_hidden = self.dropout(fused_hidden)
+
+            # START DECODER
+            # Chuẩn bị input cho decoder
+            if labels is not None:
+                decoder_input_ids = self._shift_right(labels)
+            else:
+                # Trong suy luận, khởi tạo với token bắt đầu (nếu cần)
+                decoder_input_ids = torch.ones(
+                    (input_ids.size(0), 1), dtype=torch.long, device=input_ids.device
+                ) * self.tokenizer.bos_token_id
+                
+            # Để tiết kiệm bộ nhớ, chia decoder thành các batch nhỏ nếu batch lớn
+            batch_size = decoder_input_ids.size(0)
+            max_batch_size = 8  # Có thể điều chỉnh dựa trên kích thước GPU
+            
+            if batch_size > max_batch_size and not self.training:
+                # Xử lý theo mini-batch cho validation
+                all_logits = []
+                for i in range(0, batch_size, max_batch_size):
+                    end_idx = min(i + max_batch_size, batch_size)
+                    mini_decoder_input_ids = decoder_input_ids[i:end_idx]
+                    mini_fused_hidden = fused_hidden[i:end_idx]
+                    
+                    # Tạo embedding cho decoder
+                    mini_decoder_embeds = self.lm_head.weight[mini_decoder_input_ids]
+                    
+                    # Forward qua decoder
+                    mini_decoder_outputs = self.transformer_decoder(
+                        tgt=mini_decoder_embeds,
+                        memory=mini_fused_hidden.unsqueeze(1),  # [batch_size, 1, hidden_size]
+                        tgt_mask=self._generate_square_subsequent_mask(mini_decoder_embeds.size(1)).to(mini_decoder_embeds.device),
+                    )
+                    
+                    # Tính logits
+                    mini_logits = self.lm_head(mini_decoder_outputs)
+                    all_logits.append(mini_logits)
+                    
+                    # Giải phóng bộ nhớ
+                    del mini_decoder_input_ids, mini_fused_hidden, mini_decoder_embeds, mini_decoder_outputs, mini_logits
+                    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+                
+                # Kết hợp lại logits
+                logits = torch.cat(all_logits, dim=0)
+                del all_logits
+            else:
+                # Xử lý bình thường cho training hoặc batch nhỏ
+                # Tạo embedding cho decoder
+                decoder_embeds = self.lm_head.weight[decoder_input_ids]
+                
+                decoder_outputs = self.transformer_decoder(
+                    tgt=decoder_embeds,
+                    memory=fused_hidden.unsqueeze(1),  # [batch_size, 1, hidden_size]
+                    tgt_mask=self._generate_square_subsequent_mask(decoder_embeds.size(1)).to(decoder_embeds.device),
+                )
+                
+                # Tính logits
+                logits = self.lm_head(decoder_outputs)  # [batch_size, answer_seq_len, vocab_size]
+                
+                # Giải phóng bộ nhớ cho biến không cần thiết
+                del decoder_embeds, decoder_outputs
+            
+            # Tính loss nếu có labels
+            loss = None
+            if labels is not None:
+                loss_fct = nn.CrossEntropyLoss(ignore_index=self.tokenizer.pad_token_id)
+                loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1))
+
+            if return_dict:
+                return CausalLMOutputWithCrossAttentions(
+                    loss=loss,
+                    logits=logits,
+                    hidden_states=None,  # Không trả về hidden_states để tiết kiệm bộ nhớ
+                )
+            return (loss, logits)
     
     def generate(
         self,
@@ -213,4 +263,3 @@ class VQAModel(nn.Module):
                     break
             
             return torch.tensor(generated_ids, device=input_ids.device)
-            
