@@ -99,6 +99,7 @@ def compute_metrics(eval_tuple: Tuple[np.ndarray, np.ndarray]) -> Dict[str, floa
 
   bleu_metric = evaluate.load("bleu")
   rouge_metric = evaluate.load("rouge")
+  predictions, references = eval_tuple
   
   # Decode nếu là ID (bắt buộc nếu Trainer trả ra token ID)
   predictions = tokenizer.batch_decode(predictions, skip_special_tokens=True)
@@ -147,7 +148,9 @@ if __name__ == "__main__":
     # max_steps=1000,
     num_train_epochs=5,
     learning_rate=3e-5,
-    # warmup_steps=50,
+    lr_scheduler_type="linear",
+    weight_decay=0.01,
+    warmup_steps=50,
     save_steps=500,
     logging_steps=1,
     eval_strategy="epoch",
@@ -175,7 +178,7 @@ if __name__ == "__main__":
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
     data_collator=data_collator,
-    # compute_metrics=compute_metrics,
+    compute_metrics=compute_metrics,
     callbacks=[early_stop],
   )
 
