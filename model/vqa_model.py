@@ -54,11 +54,11 @@ class VQAModel(nn.Module):
 
         self.phobert = AutoModel.from_pretrained(text_model)
         self.tokenizer = AutoTokenizer.from_pretrained(text_model)
+        self.decoder_embedding = nn.Embedding(vocab_size, d_model)
 
-        self.san_model = nn.ModuleList(
-            [StackAttention(d_model=d_model, 
-                            ff_dim=ff_dim, 
-                            dropout=True)] * num_layers)
+        self.san_model = StackAttention(d_model=d_model, 
+                                        ff_dim=ff_dim, 
+                                        dropout=True)
         self.transformer_decoder = nn.TransformerDecoder(
             decoder_layer=nn.TransformerDecoderLayer(
                 d_model=d_model, 
@@ -105,8 +105,7 @@ class VQAModel(nn.Module):
         phobert_hidden = phobert_outputs.pooler_output 
         # [N, 64, 768] + [N, 197, 768] => [N, 768]
         # print("vit_hidden", vit_hidden.shape, "phobert_hidden", phobert_hidden.shape)
-        for att_layer in self.san_model:
-            fused_hidden = att_layer(vit_hidden, phobert_hidden)
+        fused_hidden = self.san_model(vit_hidden, phobert_hidden)
 
         fused_hidden = self.tanh(fused_hidden)
         fused_hidden = self.dropout(fused_hidden)
@@ -121,7 +120,7 @@ class VQAModel(nn.Module):
                 (input_ids.size(0), 1), dtype=torch.long, device=input_ids.device
             ) * self.tokenizer.bos_token_id
         # Tạo embedding cho decoder
-        decoder_embeds = self.lm_head.weight[decoder_input_ids]
+        decoder_embeds = self.decoder_embedding(decoder_input_ids)
 
         decoder_outputs = self.transformer_decoder(
             tgt=decoder_embeds,

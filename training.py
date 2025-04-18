@@ -71,7 +71,7 @@ class VQADataCollatorForGeneration:
         images=images,
         questions=questions,
         answers=answers,
-        padding="longest" if self.padding else False,
+        padding="max_length" if self.padding else False,
         return_tensors="pt",
     )
     return batch_features
@@ -125,13 +125,8 @@ if __name__ == "__main__":
   df_dev = pd.read_csv(config.dev_csv)
   df_test = pd.read_csv(config.test_csv)
 
-  transforms = transforms.Compose([
-      transforms.Resize((224, 224)),
-      transforms.ToTensor(),
-  ])
-  
-  train_dataset = VQADataset(dataframe=df_train, transform=transforms, mode="train")
-  eval_dataset = VQADataset(dataframe=df_dev, transform=transforms, mode="dev")
+  train_dataset = VQADataset(dataframe=df_train, mode="train")
+  eval_dataset = VQADataset(dataframe=df_dev, mode="dev")
   test_dataset = VQADataset(dataframe=df_test, mode="test")
 
   model = VQAModel(text_model=config.text_model, 
@@ -147,10 +142,10 @@ if __name__ == "__main__":
     per_device_eval_batch_size=max(1, config.BATCH_SIZE // 2),  # Giảm batch size cho evaluation
     # max_steps=1000,
     num_train_epochs=5,
-    learning_rate=3e-3,
-    lr_scheduler_type="linear",
+    learning_rate=1e-4,
+    lr_scheduler_type="cosine",
     weight_decay=0.01,
-    warmup_steps=50,
+    warmup_steps=200,
     save_steps=500,
     logging_steps=10,
     eval_strategy="epoch",
@@ -162,7 +157,7 @@ if __name__ == "__main__":
     fp16=True,  # Mixed precision cho GPU
     max_grad_norm=1.0,  # Gradient clipping để ổn định huấn luyện
     # report_to="wandb",
-    gradient_accumulation_steps=4,
+    gradient_accumulation_steps=2,
   )
 
   # wandb.init(

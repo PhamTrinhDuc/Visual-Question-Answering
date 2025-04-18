@@ -13,7 +13,7 @@ class config:
     IMAGE_SIZE = 224
     SEED = 42
     EPOCHS = 7
-    MAX_LEN = 64
+    MAX_LEN = 128
     BATCH_SIZE = 8
     DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     NUM_WORKERS = os.cpu_count()
