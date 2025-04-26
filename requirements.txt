@@ -1,11 +1,7 @@
 torch
 transformers
-underthesea
-vncorenlp
 pandas
 numpy
 pillow
-wandb
-datasets
-evaluate
+streamlit
 python-dotenv
