@@ -156,7 +156,6 @@ class VQAModel(nn.Module):
 
     def generate_answer(self, image, question, max_length=50, num_beams=4):
         """Sinh câu trả lời cho một cặp hình ảnh-câu hỏi"""
-        device = next(self.parameters()).device
         self.eval()
 
         with torch.no_grad():
